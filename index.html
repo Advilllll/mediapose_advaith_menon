@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tennis Tutor</title>
+<link href="style.css" rel="stylesheet" type="text/css" />
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.1/control_utils.css" crossorigin="anonymous" async=false defer=false>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.1/camera_utils.js" crossorigin="anonymous" async=false defer=false></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.1/control_utils.js" crossorigin="anonymous" async=false defer=false></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.2/drawing_utils.js" crossorigin="anonymous" async=false defer=false></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.2/pose.js" crossorigin="anonymous" async=false defer=false></script>
+</head>
+<body>
+<h2>Tennis Tutor</h2>
+<p>
+    Click <b>Start/Stop</b> button to start or stop the video.<br>
+</p>
+<div>
+<input type="file" id="videoUpload" accept="video/*" onchange="handleUpload(this)">
+<div class="control"><button id="startAndStop" disabled>Start</button></div>
+<textarea class="code" rows="29" cols="100" id="codeEditor" spellcheck="false"></textarea>
+</div>
+<p class="err" id="errorMessage"></p>
+<div>
+    <table cellpadding="0" cellspacing="0" width="0" border="0">
+    <tr>
+        <td>
+            <video class="videoWrapper" id="videoInput" width="320" height="240" muted loop></video>
+        </td>
+        <td>
+            <canvas class="videoWrapper" id="canvasOutput" width="320" height="240" ></canvas>
+        </td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>
+            <div class="caption">videoInput</div>
+        </td>
+        <td>
+            <div class="caption">canvasOutput</div>
+            <div id="predictLabel"></div>
+        </td>
+        <td></td>
+        <td></td>
+    </tr>
+    </table>
+</div>
+<script src="https://webrtc.github.io/adapter/adapter-5.0.4.js" type="text/javascript"></script>
+<script src="utils.js" type="text/javascript"></script>
+<script className="codeBlock" id="codeSnippet" type="text/code-snippet">
+let video = document.getElementById('videoInput');
+let out5 = document.getElementById('canvasOutput');
+let canvasCtx5 = out5.getContext('2d');
+let cap = new cv.VideoCapture(video);
+
+// take first frame of the video
+let frame = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+cap.read(frame);
+
+let hsv = new cv.Mat(video.height, video.width, cv.CV_8UC3);
+let dst = new cv.Mat();
+let hsvVec = new cv.MatVector();
+hsvVec.push_back(hsv);
+
+// MEDIA POSE
+function zColor(data) {
+  const z = clamp(data.from.z + 0.5, 0, 1);
+  return `rgba(0, ${255 * z}, ${255 * (1 - z)}, 1)`;
+}
+
+function onResultsPose(results) {
+  document.body.classList.add('loaded');
+  handlePredict(results.poseLandmarks);
+
+  canvasCtx5.save();
+  canvasCtx5.clearRect(0, 0, out5.width, out5.height);
+  canvasCtx5.drawImage(
+      results.image, 0, 0, out5.width, out5.height);
+  drawConnectors(
+      canvasCtx5, results.poseLandmarks, POSE_CONNECTIONS, {
+        color: (data) => {
+          const x0 = out5.width * data.from.x;
+          const y0 = out5.height * data.from.y;
+          const x1 = out5.width * data.to.x;
+          const y1 = out5.height * data.to.y;
+
+          const z0 = clamp(data.from.z + 0.5, 0, 1);
+          const z1 = clamp(data.to.z + 0.5, 0, 1);
+
+          const gradient = canvasCtx5.createLinearGradient(x0, y0, x1, y1);
+          gradient.addColorStop(
+              0, `rgba(0, ${255 * z0}, ${255 * (1 - z0)}, 1)`);
+          gradient.addColorStop(
+              1.0, `rgba(0, ${255 * z1}, ${255 * (1 - z1)}, 1)`);
+          return gradient;
+        }
+      });
+  drawLandmarks(
+      canvasCtx5,
+      Object.values(POSE_LANDMARKS_LEFT)
+          .map(index => results.poseLandmarks[index]),
+      {color: zColor, fillColor: '#FF0000'});
+  drawLandmarks(
+      canvasCtx5,
+      Object.values(POSE_LANDMARKS_RIGHT)
+          .map(index => results.poseLandmarks[index]),
+      {color: zColor, fillColor: '#00FF00'});
+  drawLandmarks(
+      canvasCtx5,
+      Object.values(POSE_LANDMARKS_NEUTRAL)
+          .map(index => results.poseLandmarks[index]),
+      {color: zColor, fillColor: '#AAAAAA'});
+  canvasCtx5.restore();
+}
+
+const pose = new Pose({locateFile: (file) => {
+  return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.2/${file}`;
+}});
+pose.onResults(onResultsPose);
+
+const FPS = 30;
+var frameCount = 0;
+function processVideo() {
+        frameCount = frameCount+1
+        console.log("Processing frame:",frameCount)
+    try {
+        if (!streaming) {
+            // clean and stop.
+            // DELETED CODE ...
+            return;
+        }
+        let begin = Date.now();
+
+
+        // start processing.
+        cap.read(frame);
+        const frameImg = cv.cvtColor(frame, hsv, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+        cv.imshow('canvasOutput', frame);
+
+        pose.send({ image: out5 }).then(function() {
+          // schedule the next one.
+          let delay = 1000/FPS - (Date.now() - begin);
+          return setTimeout(processVideo, delay);
+        });
+    } catch (err) {
+        return utils.printError(err);
+    }
+};
+
+// schedule the first one.
+setTimeout(processVideo, 0);
+</script>
+<script type="text/javascript">
+// Landmark Processing
+const BATCH_PROCESS_LEN = 5;
+let BATCH_LANDMARKS = [];
+
+const LANDMARKS = [
+  'Nose',
+  'Inner Left Eye',
+  'Left Eye',
+  'Outer Left Eye',
+  'Inner Right Eye',
+  'Right Eye',
+  'Outer Right Eye',
+  'Left Ear',
+  'Right Ear',
+  'Left Mouth',
+  'Right Mouth',
+  'Left Shoulder',
+  'Right Shoulder',
+  'Left Elbow',
+  'Right Elbow',
+  'Left Wrist',
+  'Right Wrist',
+  'Left Pinky',
+  'Right Pinky',
+  'Left Index',
+  'Right Index',
+  'Left Thumb',
+  'Right Thumb',
+  'Left Hip',
+  'Right Hip',
+  'Left Knee',
+  'Right Knee',
+  'Left Ankle',
+  'Right Ankle',
+  'Left Heel',
+  'Right Heel',
+  'Left Toe',
+  'Right Toe',
+];
+
+function processLandmarks(poseLandmarks) {
+  if (poseLandmarks == null) return null;
+
+  const landmarksForNav = poseLandmarks.map((data, index) => {
+    const { x, y, z, visibility } = data;
+    const location = LANDMARKS[index];
+
+    return {
+      [`${location}X`]: x,
+      [`${location}Y`]: y,
+      [`${location}Z`]: z,
+      [`${location}V`]: visibility,
+    };
+  });
+
+  return landmarksForNav;
+}
+
+function processBatchLandmarks(poselandmarks) {
+  if (poselandmarks == null) return null;
+  BATCH_LANDMARKS.push(poselandmarks);
+  if (BATCH_LANDMARKS.length < BATCH_PROCESS_LEN) return null;
+
+  const batchedLandmarks = BATCH_LANDMARKS.reduce((acc, frameData, index) => {
+    const processedFrameData = frameData.map((data, dataIndex) => {
+      const { x, y, z, visibility } = data;
+      const location = LANDMARKS[dataIndex];
+
+      return {
+        [`${location}X_${index}`]: x,
+        [`${location}Y_${index}`]: y,
+        [`${location}Z_${index}`]: z,
+        [`${location}V_${index}`]: visibility,
+      };
+    });
+
+    return [...acc, ...processedFrameData];
+  }, []);
+
+  BATCH_LANDMARKS = [];
+
+  return batchedLandmarks;
+}
+
+// Navigator API
+const navigatorPredict = async poselandmarks => {
+  //const serviceAIEndpoint = 'https://askai.aiclub.world/24cd955c-1af4-4df7-9861-b43da92a1c75';
+  const serviceAIEndpoint = 'https://askai.aiclub.world/7620e068-467c-47e0-a546-b30202a87521';
+  
+
+  let processedLandmarks = null;
+
+  if (BATCH_PROCESS_LEN > 0) {
+    processedLandmarks = processBatchLandmarks(poselandmarks);
+  } else {
+    processedLandmarks = processLandmarks(poselandmarks);
+  }
+  if (processedLandmarks == null) return null;
+
+  const body = processedLandmarks.reduce((acc, data) => ({
+    ...acc,
+    ...data,
+  }), {});
+  console.log("About to invoke navigatorPredict:",serviceAIEndpoint,JSON.stringify(body))
+
+  return fetch(serviceAIEndpoint, {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  .then(res => res.json())
+  .then(data => data)
+  .catch(err => {
+    console.error(err);
+    return null;
+  }); 
+}
+
+function handlePredict(poselandmarks) {
+  return navigatorPredict(poselandmarks)
+    .then(prediction => {
+      if (prediction == null) return null;
+      console.log("Prediction:",prediction)
+      
+      try {
+        const predictBody = JSON.parse(prediction.body);
+        if (predictBody == null) return null;
+        if (predictBody.predicted_label == null);
+        const label = predictBody.predicted_label;
+        document.getElementById('predictLabel').innerText = label;
+      } catch (err) {
+        console.error(err);
+        return null
+      }
+    });
+}
+
+// Video Utils
+let utils = new Utils('errorMessage');
+
+utils.loadCode('codeSnippet', 'codeEditor');
+
+let streaming = false;
+let videoInput = document.getElementById('videoInput');
+let startAndStop = document.getElementById('startAndStop');
+let canvasOutput = document.getElementById('canvasOutput');
+let canvasContext = canvasOutput.getContext('2d');
+
+startAndStop.addEventListener('click', () => {
+    if (!streaming) {
+        utils.clearError();
+        videoInput.play().then(() => {
+            onVideoStarted();
+        });
+    } else {
+        videoInput.pause();
+        videoInput.currentTime = 0;
+        onVideoStopped();
+    }
+});
+
+function onVideoStarted() {
+    streaming = true;
+    startAndStop.innerText = 'Stop';
+    videoInput.height = videoInput.width * (videoInput.videoHeight / videoInput.videoWidth);
+    utils.executeCode('codeEditor');
+}
+
+function onVideoStopped() {
+    streaming = false;
+    canvasContext.clearRect(0, 0, canvasOutput.width, canvasOutput.height);
+    startAndStop.innerText = 'Start';
+}
+
+utils.loadOpenCv(() => {
+    videoInput.addEventListener('canplay', () => {
+        startAndStop.removeAttribute('disabled');
+    });
+});
+
+function handleUpload(ele) {
+  if (ele != null) {
+    const videoFile = ele.files[0];
+
+    if (videoFile != null) {
+      videoInput.pause();
+      videoInput.currentTime = 0;
+      onVideoStopped();
+      videoInput.src = URL.createObjectURL(videoFile);
+    }
+  }
+}
+
+</script>
+</body>
+</html>
